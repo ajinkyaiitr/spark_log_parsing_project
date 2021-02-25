@@ -1,0 +1,6 @@
+package com.cloudxlab.logparsing
+
+import org.scalatest.FlatSpec
+
+class LogParserSpec extends flatSpec {
+var utils = new utils
