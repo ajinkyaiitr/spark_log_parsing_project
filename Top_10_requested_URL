@@ -1,0 +1,117 @@
+import re
+from pyspark import SparkConf, SparkContext
+from pyspark.sql import Row
+from datetime import datetime
+
+logFile = '/data/spark/project/NASA_access_log_Aug95.gz'
+
+
+logPattern = ""r'(.*) - - \[(.* -0400)\] \"(.*) (/.*[.]\D+)(\b| HTTP/1.0)\" (\d{3}) (.*)'""
+
+#This function returns a dictionary of the elements of the log 
+def logLineParsing(logLine):
+    identify = re.search(logPattern, logLine)
+    
+    if identify is None:
+         
+        return "wrong"
+    
+    return Row(
+            host = identify.group(1),
+            timestamp = identify.group(2),
+            requestURL = identify.group(4),            
+            HTTPreply = (identify.group(6)),
+            bytesRtrnd = (identify.group(7)))
+    
+conf = (SparkConf().setAppName("logParsing"))
+sc = SparkContext(conf = conf)
+
+logRDD = (sc.textFile(logFile)
+            #The logLineParsing function is used on each line
+            .map(logLineParsing)
+            #The RDD is cached since it will be queried several times
+            .cache())
+
+#Non-compliant rows are filtered out
+logRDD = logRDD.filter(lambda line: line!="wrong") 
+
+#1st exercise, URLs are counted...
+urlRDD = logRDD.map(lambda row: (row.requestURL,1)).reduceByKey(lambda x, y:x+y)
+#... sorted and printed:
+print(urlRDD.coalesce(1).sortBy(lambda x: -x[1]).take(10))
+print(" ")
+
+#2nd exercise, hours of the day are counted...
+hoursRDD = logRDD.map(lambda row: (datetime.strptime(row.timestamp, '%d/%b/%Y:%H:%M:%S -0400').hour,1)).reduceByKey(lambda x, y:x+y)
+#... sorted and printed:
+print(hoursRDD.coalesce(1).sortBy(lambda x: -x[1]).take(5))
+print(" ")
+
+#2nd exercise, days of the week are counted...
+daysRDD = logRDD.map(lambda row: (datetime.strptime(row.timestamp, '%d/%b/%Y:%H:%M:%S -0400').strftime('%A'),1)).reduceByKey(lambda x, y:x+y)
+#... sorted and printed:
+print(daysRDD.coalesce(1).sortBy(lambda x: -x[1]).take(5))
+print(" ")
+
+#3rd exercise, hours of the day are counted...
+hoursRDD = logRDD.map(lambda row: (datetime.strptime(row.timestamp, '%d/%b/%Y:%H:%M:%S -0400').hour,1)).reduceByKey(lambda x, y:x+y)
+#... sorted and printed:
+print(hoursRDD.coalesce(1).sortBy(lambda x: x[1]).take(5))
+print(" ")
+
+#3rd exercise, days of the week are counted...
+daysRDD = logRDD.map(lambda row: (datetime.strptime(row.timestamp, '%d/%b/%Y:%H:%M:%S -0400').strftime('%A'),1)).reduceByKey(lambda x, y:x+y)
+#... sorted and printed:
+print(daysRDD.coalesce(1).sortBy(lambda x: x[1]).take(5))
+print(" ")
+
+#4th exercise, HTTP reply is counted...
+httpRDD = logRDD.map(lambda row: (row.HTTPreply,1)).reduceByKey(lambda x, y:x+y)
+#...sorted and printed
+print(httpRDD.coalesce(1).sortBy(lambda x: -x[1]).take(10))
+
+
+
+
+###Write spark code to find out the top five-time frame for high traffic (which day of the week or hour of the day receives peak traffic
+, this information will help the company to manage resources for handling peak traffic load)
+
+# This code is written by one of our student. Works only in Spark2.0 and above
+
+case class LogRecord( host: String, timeStamp: String, url:String,httpCode:Int)
+
+val PATTERN = """^(\S+) (\S+) (\S+) \[([\w:/]+\s[+\-]\d{4})\] "(\S+) (\S+)(.*)" (\d{3}) (\S+)""".r
+
+def parseLogLine(log: String):
+	LogRecord = {
+		val res = PATTERN.findFirstMatchIn(log) 
+		if (res.isEmpty)
+		{
+			println("Rejected Log Line: " + log)
+			LogRecord("Empty", "", "",  -1 )
+		}
+		else 
+		{
+			val m = res.get
+			LogRecord(m.group(1), m.group(4),m.group(6), m.group(8).toInt)
+		}
+	}
+
+val logFile = sc.textFile("/data/spark/project/NASA_access_log_Aug95.gz")
+val accessLog = logFile.map(parseLogLine)
+val accessDf = accessLog.toDF()
+accessDf.printSchema
+accessDf.createOrReplaceTempView("nasalog")
+val output = spark.sql("select * from nasalog")
+output.createOrReplaceTempView("nasa_log")
+spark.sql("cache TABLE nasa_log")
+
+spark.sql("select url,count(*) as req_cnt from nasa_log where upper(url) like '%HTML%' group by url order by req_cnt desc LIMIT 10").show
+
+spark.sql("select host,count(*) as req_cnt from nasa_log group by host order by req_cnt desc LIMIT 5").show
+
+spark.sql("select substr(timeStamp,1,14) as timeFrame,count(*) as req_cnt from nasa_log group by substr(timeStamp,1,14) order by req_cnt desc LIMIT 5").show
+
+spark.sql("select substr(timeStamp,1,14) as timeFrame,count(*) as req_cnt from nasa_log group by substr(timeStamp,1,14) order by req_cnt  LIMIT 5").show
+
+spark.sql("select httpCode,count(*) as req_cnt from nasa_log group by httpCode ").show
